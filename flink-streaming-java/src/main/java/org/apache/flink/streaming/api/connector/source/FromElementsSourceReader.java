@@ -1,71 +1,73 @@
 package org.apache.flink.streaming.api.connector.source;
 
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.connector.source.ReaderOutput;
 import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.core.io.InputStatus;
+import org.apache.flink.core.memory.DataInputViewStreamWrapper;
+import org.apache.flink.util.Preconditions;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.Iterables;
-
-import java.util.ArrayDeque;
-import java.util.Iterator;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
-import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 
+/** todo. */
 public class FromElementsSourceReader<T> implements SourceReader<T, FromElementsSplit> {
-    /** The context for this reader, to communicate with the enumerator. */
+
     private final SourceReaderContext context;
 
-    /** The availability future. This reader is available as soon as a split is assigned. */
-    private CompletableFuture<Void> availability;
+    private final TypeSerializer<T> serializer;
 
-    private final Iterable<T> elements;
-    private final Iterator<T> elementsIter;
+    private volatile boolean isRunning = true;
+
+    /** The availability future. This reader is available as soon as a split is assigned. */
+    private final CompletableFuture<Void> availability;
 
     private final int elementsCount;
+    private int currentOffset = 0;
 
-    private int currentOffset;
-
-    private FromElementsSplit currentSplit;
-
-    private boolean noMoreSplits;
-
-    /** The remaining splits that were assigned but not yet processed. */
-    private final Queue<FromElementsSplit> remainingSplits;
+    private final DataInputViewStreamWrapper serializedElementsStream;
 
     public FromElementsSourceReader(
             SourceReaderContext context,
-            Iterable<T> elements) {
+            TypeSerializer<T> serializer,
+            byte[] serializedElements,
+            int elementsCount) {
         this.context = context;
-        this.elements = elements;
-        this.elementsIter = elements.iterator();
-        this.elementsCount = Iterables.size(elements);
+        this.serializer = serializer;
+        this.elementsCount = elementsCount;
         this.availability = new CompletableFuture<>();
-        this.remainingSplits = new ArrayDeque<>();
+        this.serializedElementsStream =
+                new DataInputViewStreamWrapper(new ByteArrayInputStream(serializedElements));
     }
 
     @Override
     public void start() {
-        if (remainingSplits.isEmpty()) {
-            context.sendSplitRequest();
-        }
+        // todo: tmp
+        context.sendSplitRequest();
     }
 
     @Override
     public InputStatus pollNext(ReaderOutput<T> output) throws Exception {
-        if (currentSplit != null) {
-            if (elementsIter.hasNext()) {
-                output.collect(elementsIter.next());
+        if (isRunning && currentOffset < elementsCount) {
+            try {
+                T record = serializer.deserialize(serializedElementsStream);
+                output.collect(record);
+                ++currentOffset;
+                return InputStatus.MORE_AVAILABLE;
+            } catch (Exception e) {
+                throw new IOException("Failed to deserialize an element from the source.", e);
             }
         }
-
-        return null;
+        return InputStatus.END_OF_INPUT;
     }
 
     @Override
     public List<FromElementsSplit> snapshotState(long checkpointId) {
-        return null;
+        return Collections.singletonList(new FromElementsSplit(currentOffset));
     }
 
     @Override
@@ -75,18 +77,40 @@ public class FromElementsSourceReader<T> implements SourceReader<T, FromElements
 
     @Override
     public void addSplits(List<FromElementsSplit> splits) {
-        remainingSplits.addAll(splits);
+        // source should be used only with parallelism 1
+        Preconditions.checkArgument(splits.size() == 1);
+        currentOffset = splits.get(0).getOffset();
+        skipElements(currentOffset);
         // set availability so that pollNext is actually called
         availability.complete(null);
     }
 
     @Override
     public void notifyNoMoreSplits() {
-        noMoreSplits = true;
         // set availability so that pollNext is actually called
         availability.complete(null);
     }
 
     @Override
-    public void close() throws Exception {}
+    public void close() throws Exception {
+        isRunning = false;
+    }
+
+    private void skipElements(int elementsToSkip) {
+        try {
+            // todo add local var instead of elementsToSkip
+            serializedElementsStream.reset();
+            while (elementsToSkip > 0) {
+                serializer.deserialize(serializedElementsStream);
+                elementsToSkip--;
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Failed to deserialize an element from the source. "
+                            + "If you are using user-defined serialization (Value and Writable types), check the "
+                            + "serialization functions.\nSerializer is "
+                            + serializer,
+                    e);
+        }
+    }
 }

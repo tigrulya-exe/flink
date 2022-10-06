@@ -5,6 +5,7 @@ import org.apache.flink.api.connector.source.SourceSplit;
 import java.io.Serializable;
 import java.util.UUID;
 
+/** todo. */
 public class FromElementsSplit implements SourceSplit, Serializable {
     private final String splitId;
     private int offset;

@@ -7,23 +7,24 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayDeque;
-import java.util.Collection;
 import java.util.List;
 import java.util.Queue;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-public class FromElementsSplitEnumerator<T>
-        implements SplitEnumerator<CollectionSplit<T>, Collection<CollectionSplit<T>>> {
+// todo we can change it to no-op
+/** todo. */
+public class FromElementsSplitEnumerator
+        implements SplitEnumerator<FromElementsSplit, FromElementsSplit> {
 
-    private final SplitEnumeratorContext<CollectionSplit<T>> context;
-    private final Queue<CollectionSplit<T>> remainingSplits;
+    private final SplitEnumeratorContext<FromElementsSplit> context;
+    private final Queue<FromElementsSplit> remainingSplits;
 
     public FromElementsSplitEnumerator(
-            SplitEnumeratorContext<CollectionSplit<T>> context,
-            Collection<CollectionSplit<T>> splits) {
+            SplitEnumeratorContext<FromElementsSplit> context, FromElementsSplit split) {
         this.context = checkNotNull(context);
-        this.remainingSplits = new ArrayDeque<>(splits);
+        this.remainingSplits = new ArrayDeque<>();
+        remainingSplits.add(split);
     }
 
     @Override
@@ -31,7 +32,7 @@ public class FromElementsSplitEnumerator<T>
 
     @Override
     public void handleSplitRequest(int subtaskId, @Nullable String requesterHostname) {
-        final CollectionSplit<T> nextSplit = remainingSplits.poll();
+        final FromElementsSplit nextSplit = remainingSplits.poll();
         if (nextSplit != null) {
             context.assignSplit(nextSplit, subtaskId);
         } else {
@@ -40,7 +41,7 @@ public class FromElementsSplitEnumerator<T>
     }
 
     @Override
-    public void addSplitsBack(List<CollectionSplit<T>> splits, int subtaskId) {
+    public void addSplitsBack(List<FromElementsSplit> splits, int subtaskId) {
         remainingSplits.addAll(splits);
     }
 
@@ -48,8 +49,8 @@ public class FromElementsSplitEnumerator<T>
     public void addReader(int subtaskId) {}
 
     @Override
-    public Collection<CollectionSplit<T>> snapshotState(long checkpointId) throws Exception {
-        return remainingSplits;
+    public FromElementsSplit snapshotState(long checkpointId) throws Exception {
+        return remainingSplits.poll();
     }
 
     @Override
