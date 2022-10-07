@@ -1,6 +1,5 @@
 package org.apache.flink.streaming.api.connector.source;
 
-import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
@@ -8,9 +7,11 @@ import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
-import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
+import org.apache.flink.streaming.api.connector.source.enumerator.NoOpEnumState;
+import org.apache.flink.streaming.api.connector.source.enumerator.NoOpEnumStateSerializer;
+import org.apache.flink.streaming.api.connector.source.enumerator.NoOpEnumerator;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterables;
@@ -23,7 +24,7 @@ import java.io.ObjectOutputStream;
 import java.util.Collection;
 
 /** todo. */
-public class FromElementsSource<T> implements Source<T, FromElementsSplit, FromElementsSplit> {
+public class FromElementsSource<T> implements Source<T, FromElementsSplit, NoOpEnumState> {
 
     /** The actual data elements, in serialized form. */
     private byte[] elementsSerialized;
@@ -48,22 +49,21 @@ public class FromElementsSource<T> implements Source<T, FromElementsSplit, FromE
     @Override
     public SourceReader<T, FromElementsSplit> createReader(SourceReaderContext readerContext)
             throws Exception {
-        return new FromElementsSourceReader(
+        return new FromElementsSourceReader<>(
                 readerContext, serializer, elementsSerialized, elementsCount);
     }
 
     @Override
-    public SplitEnumerator<FromElementsSplit, FromElementsSplit> createEnumerator(
+    public SplitEnumerator<FromElementsSplit, NoOpEnumState> createEnumerator(
             SplitEnumeratorContext<FromElementsSplit> enumContext) throws Exception {
-        FromElementsSplit startSplit = new FromElementsSplit(0);
-        return new FromElementsSplitEnumerator(enumContext, startSplit);
+        return new NoOpEnumerator<>();
     }
 
     @Override
-    public SplitEnumerator<FromElementsSplit, FromElementsSplit> restoreEnumerator(
-            SplitEnumeratorContext<FromElementsSplit> enumContext, FromElementsSplit restoredSplits)
+    public SplitEnumerator<FromElementsSplit, NoOpEnumState> restoreEnumerator(
+            SplitEnumeratorContext<FromElementsSplit> enumContext, NoOpEnumState restoredSplits)
             throws Exception {
-        return new FromElementsSplitEnumerator(enumContext, restoredSplits);
+        return new NoOpEnumerator<>();
     }
 
     @Override
@@ -72,30 +72,9 @@ public class FromElementsSource<T> implements Source<T, FromElementsSplit, FromE
     }
 
     @Override
-    public SimpleVersionedSerializer<FromElementsSplit> getEnumeratorCheckpointSerializer() {
-        return new FromElementsSplitSerializer();
+    public SimpleVersionedSerializer<NoOpEnumState> getEnumeratorCheckpointSerializer() {
+        return new NoOpEnumStateSerializer();
     }
-
-    //    private Collection<FromElementsSplit> createSplits(Collection<T> collection, int
-    // numSplits) {
-    //        int chunkSize = collection.size() / numSplits;
-    //        int remainder = collection.size() % numSplits;
-    //
-    //        List<FromElementsSplit> collectionSplits = new ArrayList<>(numSplits);
-    //
-    //        Iterator<T> collectionIter = collection.iterator();
-    //        for (int splitId = 0; splitId < numSplits; ++splitId) {
-    //            int currentChunkSize = splitId < remainder ? chunkSize : chunkSize + 1;
-    //
-    //            List<T> chunk = new ArrayList<>(currentChunkSize);
-    //            for (int i = 0; i < currentChunkSize; ++i) {
-    //                chunk.add(collectionIter.next());
-    //            }
-    //            collectionSplits.add(new CollectionSplit<>(chunk));
-    //        }
-    //
-    //        return collectionSplits;
-    //    }
 
     private void serializeElements() throws IOException {
         Preconditions.checkState(serializer != null, "serializer not set");

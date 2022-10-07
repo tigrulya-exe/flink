@@ -45,10 +45,7 @@ public class FromElementsSourceReader<T> implements SourceReader<T, FromElements
     }
 
     @Override
-    public void start() {
-        // todo: tmp
-        context.sendSplitRequest();
-    }
+    public void start() {}
 
     @Override
     public InputStatus pollNext(ReaderOutput<T> output) throws Exception {
@@ -80,6 +77,7 @@ public class FromElementsSourceReader<T> implements SourceReader<T, FromElements
         // source should be used only with parallelism 1
         Preconditions.checkArgument(splits.size() == 1);
         currentOffset = splits.get(0).getOffset();
+        System.out.println("ADD SPLIT: " + currentOffset);
         skipElements(currentOffset);
         // set availability so that pollNext is actually called
         availability.complete(null);
@@ -94,15 +92,16 @@ public class FromElementsSourceReader<T> implements SourceReader<T, FromElements
     @Override
     public void close() throws Exception {
         isRunning = false;
+        serializedElementsStream.close();
     }
 
     private void skipElements(int elementsToSkip) {
+        int toSkip = elementsToSkip;
         try {
-            // todo add local var instead of elementsToSkip
             serializedElementsStream.reset();
-            while (elementsToSkip > 0) {
+            while (toSkip > 0) {
                 serializer.deserialize(serializedElementsStream);
-                elementsToSkip--;
+                toSkip--;
             }
         } catch (Exception e) {
             throw new RuntimeException(

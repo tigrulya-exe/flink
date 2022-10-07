@@ -38,6 +38,7 @@ import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.api.connector.source.lib.NumberSequenceSource;
@@ -77,6 +78,7 @@ import org.apache.flink.runtime.state.StateBackend;
 import org.apache.flink.runtime.state.StateBackendLoader;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.TimeCharacteristic;
+import org.apache.flink.streaming.api.connector.source.FromElementsSource;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
@@ -1253,6 +1255,26 @@ public class StreamExecutionEnvironment implements AutoCloseable {
         SourceFunction<OUT> function = new FromElementsFunction<>(data);
         return addSource(function, "Collection Source", typeInfo, Boundedness.BOUNDED)
                 .setParallelism(1);
+    }
+
+    public <OUT> DataStreamSource<OUT> fromCollectionNew(
+            Collection<OUT> data, TypeInformation<OUT> typeInfo) {
+        Preconditions.checkNotNull(data, "Collection must not be null");
+
+        // must not have null elements and mixed elements
+        FromElementsFunction.checkCollection(data, typeInfo.getTypeClass());
+
+        try {
+            TypeSerializer<OUT> serializer = typeInfo.createSerializer(getConfig());
+            return fromSource(
+                            new FromElementsSource<>(serializer, data),
+                            WatermarkStrategy.noWatermarks(),
+                            "From Elements Source",
+                            typeInfo)
+                    .setParallelism(1);
+        } catch (IOException e) {
+            throw new RuntimeException(e.getMessage(), e);
+        }
     }
 
     /**
