@@ -1,4 +1,4 @@
-package org.apache.flink.streaming.api.connector.source.splittable;
+package org.apache.flink.streaming.api.connector.source.single;
 
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -10,7 +10,6 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.lib.util.IteratorSourceEnumerator;
 import org.apache.flink.api.connector.source.lib.util.IteratorSourceReader;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
-import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.util.Preconditions;
 
@@ -23,22 +22,25 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Iterator;
+import java.util.Collections;
 import java.util.List;
 
 /** todo. */
-public class FromElementsSource<T>
+public class FromElementsSourceSingle<T>
         implements Source<T, ElementsSplit<T>, Collection<ElementsSplit<T>>> {
     private final transient Iterable<T> elements;
+
+    private byte[] serializedElements;
 
     private final TypeSerializer<T> serializer;
 
     private final int elementsCount;
 
-    public FromElementsSource(TypeSerializer<T> serializer, Iterable<T> elements) {
+    public FromElementsSourceSingle(TypeSerializer<T> serializer, Iterable<T> elements) {
         this.elements = Preconditions.checkNotNull(elements);
         this.serializer = Preconditions.checkNotNull(serializer);
         this.elementsCount = Iterables.size(elements);
+        this.serializedElements = serializeElements(elements);
     }
 
     @Override
@@ -55,17 +57,24 @@ public class FromElementsSource<T>
     @Override
     public SplitEnumerator<ElementsSplit<T>, Collection<ElementsSplit<T>>> createEnumerator(
             SplitEnumeratorContext<ElementsSplit<T>> enumContext) throws Exception {
-        Collection<ElementsSplit<T>> splits =
-                createSplits(elements, enumContext.currentParallelism());
-        return new IteratorSourceEnumerator<>(enumContext, splits);
+        ElementsSplit<T> split = new ElementsSplit<>(serializedElements, elementsCount, serializer);
+        return new IteratorSourceEnumerator<>(enumContext, Collections.singletonList(split));
     }
 
     @Override
     public SplitEnumerator<ElementsSplit<T>, Collection<ElementsSplit<T>>> restoreEnumerator(
             SplitEnumeratorContext<ElementsSplit<T>> enumContext,
-            Collection<ElementsSplit<T>> checkpoint)
+            Collection<ElementsSplit<T>> restoredSplits)
             throws Exception {
-        return new IteratorSourceEnumerator<>(enumContext, checkpoint);
+        Preconditions.checkArgument(restoredSplits.size() == 1);
+
+        ElementsSplit<T> split =
+                new ElementsSplit<>(
+                        serializedElements,
+                        elementsCount,
+                        serializer,
+                        restoredSplits.iterator().next().getCurrentOffset());
+        return new IteratorSourceEnumerator<>(enumContext, Collections.singletonList(split));
     }
 
     @Override
@@ -77,27 +86,6 @@ public class FromElementsSource<T>
     public SimpleVersionedSerializer<Collection<ElementsSplit<T>>>
             getEnumeratorCheckpointSerializer() {
         return new ElementsSplitsSerializer<>();
-    }
-
-    private Collection<ElementsSplit<T>> createSplits(Iterable<T> collection, int numSplits) {
-        int chunkSize = elementsCount / numSplits;
-        int remainder = elementsCount % numSplits;
-
-        List<ElementsSplit<T>> collectionSplits = new ArrayList<>(numSplits);
-
-        Iterator<T> collectionIter = collection.iterator();
-        for (int splitId = 0; splitId < numSplits; ++splitId) {
-            int currentChunkSize = splitId < remainder ? chunkSize : chunkSize + 1;
-
-            List<T> chunk = new ArrayList<>(currentChunkSize);
-            for (int i = 0; i < currentChunkSize; ++i) {
-                chunk.add(collectionIter.next());
-            }
-            collectionSplits.add(
-                    new ElementsSplit<>(serializeElements(chunk), currentChunkSize, serializer));
-        }
-
-        return collectionSplits;
     }
 
     private byte[] serializeElements(Iterable<T> elements) {
@@ -115,23 +103,6 @@ public class FromElementsSource<T>
         return baos.toByteArray();
     }
 
-    private Iterable<T> deserializeElements(byte[] serializedElements) {
-        Preconditions.checkState(serializer != null, "serializer not set");
-        ByteArrayInputStream baos = new ByteArrayInputStream(serializedElements);
-        DataInputViewStreamWrapper wrapper = new DataInputViewStreamWrapper(baos);
-        List<T> elements = new ArrayList<>();
-        try {
-            for (int i = 0; i < elementsCount; i++) {
-                elements.add(serializer.deserialize(wrapper));
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Serializing the source elements failed: " + e.getMessage(), e);
-        }
-        return elements;
-    }
-
-    /** todo. */
     public static class ElementsSplitSerializer<E>
             implements SimpleVersionedSerializer<ElementsSplit<E>> {
         private static final int VERSION = 1;

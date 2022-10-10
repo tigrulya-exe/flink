@@ -78,7 +78,7 @@ import org.apache.flink.runtime.state.StateBackend;
 import org.apache.flink.runtime.state.StateBackendLoader;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.TimeCharacteristic;
-import org.apache.flink.streaming.api.connector.source.splittable.FromElementsSource;
+import org.apache.flink.streaming.api.connector.source.single.FromElementsSourceSingle;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
@@ -1266,10 +1266,11 @@ public class StreamExecutionEnvironment implements AutoCloseable {
 
         TypeSerializer<OUT> serializer = typeInfo.createSerializer(getConfig());
         return fromSource(
-                new FromElementsSource<>(serializer, data),
-                WatermarkStrategy.noWatermarks(),
-                "From Elements Source",
-                typeInfo);
+                        new FromElementsSourceSingle<>(serializer, data),
+                        WatermarkStrategy.noWatermarks(),
+                        "From Elements Source",
+                        typeInfo)
+                .setParallelism(1);
     }
 
     /**
