@@ -1,4 +1,4 @@
-package org.apache.flink.streaming.api.connector.source.single;
+package org.apache.flink.streaming.api.connector.source;
 
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.connector.source.lib.util.IteratorSourceSplit;
@@ -12,13 +12,11 @@ import java.util.UUID;
 
 /** todo. */
 public class ElementsSplit<E> implements IteratorSourceSplit<E, Iterator<E>>, Serializable {
-    private final String splitId = UUID.randomUUID().toString();
+    private static final String SPLIT_ID = "0";
 
-    private final transient byte[] serializedData;
-
-    private final transient TypeSerializer<E> serializer;
-
-    private final transient int elementsCount;
+    private final byte[] serializedData;
+    private final TypeSerializer<E> serializer;
+    private final int elementsCount;
 
     private int currentOffset;
 
@@ -39,7 +37,7 @@ public class ElementsSplit<E> implements IteratorSourceSplit<E, Iterator<E>>, Se
 
     @Override
     public String splitId() {
-        return splitId;
+        return SPLIT_ID;
     }
 
     @Override
@@ -54,6 +52,18 @@ public class ElementsSplit<E> implements IteratorSourceSplit<E, Iterator<E>>, Se
 
     public int getCurrentOffset() {
         return currentOffset;
+    }
+
+    public byte[] getSerializedData() {
+        return serializedData;
+    }
+
+    public TypeSerializer<E> getSerializer() {
+        return serializer;
+    }
+
+    public int getElementsCount() {
+        return elementsCount;
     }
 
     /** todo. */
@@ -95,12 +105,7 @@ public class ElementsSplit<E> implements IteratorSourceSplit<E, Iterator<E>>, Se
                     toSkip--;
                 }
             } catch (Exception e) {
-                throw new RuntimeException(
-                        "Failed to deserialize an element from the source. "
-                                + "If you are using user-defined serialization (Value and Writable types), check the "
-                                + "serialization functions.\nSerializer is "
-                                + serializer,
-                        e);
+                throw new RuntimeException("Failed to deserialize an element from the source.", e);
             }
         }
 

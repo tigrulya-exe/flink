@@ -41,7 +41,7 @@ public class FromElementsSourceITCase extends TestLogger {
     public void setup() {
         System.out.println("SETUP");
         env = StreamExecutionEnvironment.getExecutionEnvironment();
-        // env.setParallelism(1);
+        env.setParallelism(1);
     }
 
     @Test
@@ -56,7 +56,7 @@ public class FromElementsSourceITCase extends TestLogger {
         MINI_CLUSTER.getMiniCluster().executeJobBlocking(env.getStreamGraph().getJobGraph());
     }
 
-    // @Test
+    @Test
     public void testRunSourceWithCheckpoint() throws Exception {
         env.enableCheckpointing(50);
         env.setRestartStrategy(RestartStrategies.fixedDelayRestart(1, 200L));

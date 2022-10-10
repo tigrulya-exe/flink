@@ -1,4 +1,4 @@
-package org.apache.flink.streaming.api.connector.source.single;
+package org.apache.flink.streaming.api.connector.source;
 
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -26,7 +26,7 @@ import java.util.Collections;
 import java.util.List;
 
 /** todo. */
-public class FromElementsSourceSingle<T>
+public class FromElementsSource<T>
         implements Source<T, ElementsSplit<T>, Collection<ElementsSplit<T>>> {
     private final transient Iterable<T> elements;
 
@@ -36,7 +36,7 @@ public class FromElementsSourceSingle<T>
 
     private final int elementsCount;
 
-    public FromElementsSourceSingle(TypeSerializer<T> serializer, Iterable<T> elements) {
+    public FromElementsSource(TypeSerializer<T> serializer, Iterable<T> elements) {
         this.elements = Preconditions.checkNotNull(elements);
         this.serializer = Preconditions.checkNotNull(serializer);
         this.elementsCount = Iterables.size(elements);
@@ -67,14 +67,7 @@ public class FromElementsSourceSingle<T>
             Collection<ElementsSplit<T>> restoredSplits)
             throws Exception {
         Preconditions.checkArgument(restoredSplits.size() == 1);
-
-        ElementsSplit<T> split =
-                new ElementsSplit<>(
-                        serializedElements,
-                        elementsCount,
-                        serializer,
-                        restoredSplits.iterator().next().getCurrentOffset());
-        return new IteratorSourceEnumerator<>(enumContext, Collections.singletonList(split));
+        return new IteratorSourceEnumerator<>(enumContext, restoredSplits);
     }
 
     @Override
@@ -90,19 +83,19 @@ public class FromElementsSourceSingle<T>
 
     private byte[] serializeElements(Iterable<T> elements) {
         Preconditions.checkState(serializer != null, "serializer not set");
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        DataOutputViewStreamWrapper wrapper = new DataOutputViewStreamWrapper(baos);
-        try {
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+             DataOutputViewStreamWrapper wrapper = new DataOutputViewStreamWrapper(baos)) {
             for (T element : elements) {
                 serializer.serialize(element, wrapper);
             }
+            return baos.toByteArray();
         } catch (Exception e) {
             throw new RuntimeException(
                     "Serializing the source elements failed: " + e.getMessage(), e);
         }
-        return baos.toByteArray();
     }
 
+    /** todo. */
     public static class ElementsSplitSerializer<E>
             implements SimpleVersionedSerializer<ElementsSplit<E>> {
         private static final int VERSION = 1;
@@ -116,7 +109,7 @@ public class FromElementsSourceSingle<T>
         public byte[] serialize(ElementsSplit<E> obj) throws IOException {
             ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
             try (ObjectOutputStream outputStream = new ObjectOutputStream(byteArrayOutputStream)) {
-                outputStream.writeObject(obj);
+                serializeSplit(obj, outputStream);
             }
             return byteArrayOutputStream.toByteArray();
         }
@@ -126,10 +119,28 @@ public class FromElementsSourceSingle<T>
             Preconditions.checkArgument(version == VERSION);
             try (ObjectInputStream inputStream =
                     new ObjectInputStream(new ByteArrayInputStream(serialized))) {
-                return (ElementsSplit<E>) inputStream.readObject();
+                return deserializeSplit(inputStream);
             } catch (ClassNotFoundException exc) {
                 throw new IOException("Failed to deserialize FromElementsSplit", exc);
             }
+        }
+
+        static <E> void serializeSplit(ElementsSplit<E> obj, ObjectOutputStream outputStream) throws IOException {
+            byte[] serializedData = obj.getSerializedData();
+            outputStream.writeInt(serializedData.length);
+            outputStream.write(serializedData);
+            outputStream.writeInt(obj.getElementsCount());
+            outputStream.writeInt(obj.getCurrentOffset());
+            outputStream.writeObject(obj.getSerializer());
+        }
+
+        static <E> ElementsSplit<E> deserializeSplit(ObjectInputStream inputStream) throws IOException, ClassNotFoundException {
+            int buffSize = inputStream.readInt();
+            byte[] serializedData = new byte[buffSize];
+            int elementsCount = inputStream.readInt();
+            int currentOffset = inputStream.readInt();
+            TypeSerializer<E> serializer = (TypeSerializer<E>) inputStream.readObject();
+            return new ElementsSplit<>(serializedData, elementsCount, serializer, currentOffset);
         }
     }
 
@@ -149,7 +160,7 @@ public class FromElementsSourceSingle<T>
             try (ObjectOutputStream outputStream = new ObjectOutputStream(byteArrayOutputStream)) {
                 outputStream.writeInt(splits.size());
                 for (ElementsSplit<E> split : splits) {
-                    outputStream.writeObject(split);
+                    ElementsSplitSerializer.serializeSplit(split, outputStream);
                 }
             }
             return byteArrayOutputStream.toByteArray();
@@ -165,7 +176,7 @@ public class FromElementsSourceSingle<T>
                 List<ElementsSplit<E>> splits = new ArrayList<>();
 
                 while (size > 0) {
-                    splits.add((ElementsSplit<E>) inputStream.readObject());
+                    splits.add(ElementsSplitSerializer.deserializeSplit(inputStream));
                     --size;
                 }
                 return splits;
